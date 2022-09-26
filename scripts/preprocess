@@ -1,0 +1,173 @@
+#!/usr/bin/env python
+
+import argparse
+import multiprocessing
+import os
+import re
+import shutil
+
+from collections import defaultdict
+
+import tqdm
+import numpy as np
+
+from lagrtools.graph     import load_single_graph_from_dict
+from lagrtools.intersect import graph_intersection
+from lagrtools.funcs     import (
+    parse_features_config, construct_merged_graph, save_merged_graph
+)
+
+FNAME_RE = re.compile(r'^clusters-(img|tru)-(.*)\.npz$')
+ARRAY_RE = re.compile(r'^(cluster_\d+)_(.*)$')
+
+def merge_source_files(files_img, files_tru):
+    keys_img  = set(files_img.keys())
+    keys_tru  = set(files_tru.keys())
+    keys_diff = keys_img.symmetric_difference(keys_tru)
+    keys_int  = keys_img.intersection(keys_tru)
+
+    if len(keys_diff) > 0:
+        print('Mismatched img-tru files found')
+        print(keys_diff)
+
+    return [ (k, files_img[k], files_tru[k]) for k in keys_int ]
+
+def collect_files(root):
+    files_img = {}
+    files_tru = {}
+
+    for fname in os.listdir(root):
+        m = FNAME_RE.match(fname)
+        if not m:
+            continue
+
+        file_type, suffix = m.groups()
+
+        if file_type == 'img':
+            files_img[suffix] = fname
+        else:
+            files_tru[suffix] = fname
+
+    return merge_source_files(files_img, files_tru)
+
+def load_arrays_dict(path):
+    result = defaultdict(dict)
+
+    with np.load(path) as f:
+        for name, values in f.items():
+            m = ARRAY_RE.match(name)
+            cluster_name, array_name = m.groups()
+
+            result[cluster_name][array_name] = values
+
+    return result
+
+class PreprocessWorker:
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self, root, outdir, features_config_img, features_config_tru):
+        self._root   = root
+        self._outdir = outdir
+        self._features_config_tru = features_config_tru
+        self._features_config_img = features_config_img
+
+    def __call__(self, fname_triplet):
+        suffix = fname_triplet[0]
+
+        arrays_dict_img = load_arrays_dict(
+            os.path.join(self._root, fname_triplet[1])
+        )
+        arrays_dict_tru = load_arrays_dict(
+            os.path.join(self._root, fname_triplet[2])
+        )
+
+        clusters = list(arrays_dict_img.keys())
+        for cluster in clusters:
+            graph_img = load_single_graph_from_dict(
+                arrays_dict_img[cluster], self._features_config_img
+            )
+            graph_tru = load_single_graph_from_dict(
+                arrays_dict_tru[cluster], self._features_config_tru
+            )
+
+            graph_img, graph_tru = graph_intersection(graph_img, graph_tru)
+            merged_graph = construct_merged_graph(graph_img, graph_tru)
+
+            path = os.path.join(
+                self._outdir, f'clusters_{suffix}_{cluster}.npz'
+            )
+            save_merged_graph(path, merged_graph)
+
+def parse_cmdargs():
+    parser = argparse.ArgumentParser("Precompute cropped regions")
+
+    parser.add_argument(
+        'root',
+        help    = 'Directory where the original dataset is located',
+        metavar = 'ROOT',
+        type    = str,
+    )
+
+    parser.add_argument(
+        'outdir',
+        help    = 'Output directory',
+        metavar = 'OUTDIR',
+        type    = str,
+    )
+
+    parser.add_argument(
+        '--config',
+        dest     = 'config',
+        help     = 'Features Config',
+        type     = str,
+        required = True,
+    )
+
+    return parser.parse_args()
+
+def preprocess(
+    source_list, root_src, outdir, features_config_img, features_config_tru
+):
+    progbar = tqdm.tqdm(
+        desc  = 'Preprocessing',
+        total = len(source_list),
+        dynamic_ncols = True
+    )
+    worker = PreprocessWorker(
+        root_src, outdir, features_config_img, features_config_tru
+    )
+
+    with multiprocessing.Pool() as pool:
+        for _ in pool.imap_unordered(worker, source_list):
+            progbar.update()
+
+    progbar.close()
+
+def copy_config(config_path, outdir):
+    shutil.copy(config_path, os.path.join(outdir, 'config.toml'))
+
+def main():
+    cmdargs = parse_cmdargs()
+
+    if os.path.exists(cmdargs.outdir):
+        raise RuntimeError("Output directory exists. Refusing to override")
+
+    features_config_img, features_config_tru \
+        = parse_features_config(cmdargs.config)
+
+    print("Collecting Images...")
+    source_list = collect_files(cmdargs.root)
+
+    print("Preprocessing files...")
+    os.makedirs(cmdargs.outdir, exist_ok = True)
+
+    preprocess(
+        source_list, cmdargs.root, cmdargs.outdir,
+        features_config_img, features_config_tru
+    )
+
+    copy_config(cmdargs.config, cmdargs.outdir)
+
+if __name__ == '__main__':
+    main()
+
