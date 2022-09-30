@@ -1,0 +1,172 @@
+#!/usr/bin/env python
+
+import argparse
+import json
+import multiprocessing
+import os
+
+from collections import defaultdict
+
+import tqdm
+import numpy as np
+
+class StatsAccumulator:
+
+    def __init__(self):
+        self._sum    = {}
+        self._sq_sum = {}
+        self._counts = {}
+
+        self._max = {}
+        self._min = {}
+
+    def _init_stats(self, name, values):
+        size = values.shape[1]
+
+        self._sum[name]    = np.zeros(size)
+        self._sq_sum[name] = np.zeros(size)
+        self._counts[name] = 0
+
+        self._max[name] = np.full(size, -np.inf)
+        self._min[name] = np.full(size,  np.inf)
+
+    def _acumulate(self, name, values):
+        if name not in self._sum:
+            self._init_stats(name, values)
+
+        self._sum[name]    += np.sum(values, axis = 0)
+        self._sq_sum[name] += np.sum(values**2, axis = 0)
+        self._counts[name] += len(values)
+
+        values_max = np.max(values, axis = 0)
+        values_min = np.min(values, axis = 0)
+
+        self._max[name] = np.maximum(self._max[name], values_max)
+        self._min[name] = np.minimum(self._min[name], values_min)
+
+    def append(self, node_dict):
+        for name, values in node_dict.items():
+            self._acumulate(name, values)
+
+    def __iadd__(self, other):
+        for name in other._sum.keys():
+            if name not in self._sum:
+                self._sum[name]    = other._sum[name]
+                self._sq_sum[name] = other._sq_sum[name]
+                self._counts[name] = other._counts[name]
+
+                self._max[name] = other._max[name]
+                self._min[name] = other._min[name]
+            else:
+                self._sum[name]    += other._sum[name]
+                self._sq_sum[name] += other._sq_sum[name]
+                self._counts[name] += other._counts[name]
+
+                self._max[name] = np.maximum(self._max[name], other._max[name])
+                self._min[name] = np.minimum(self._min[name], other._min[name])
+
+        return self
+
+    def to_dict(self):
+        result = { node : {} for node in self._sum }
+
+        for node, stat_dict in result.items():
+            stat_dict['mean'] = self._sum[node] / self._counts[node]
+            stat_dict['var']  = (
+                self._sq_sum[node] / self._counts[node] - stat_dict['mean']**2
+            )
+            stat_dict['stdev'] = np.sqrt(stat_dict['var'])
+            stat_dict['min']   = self._min[node]
+            stat_dict['max']   = self._max[node]
+
+        return {
+            node : {
+                stat : values.tolist() for (stat, values) in stat_dict.items()
+            }
+            for (node, stat_dict) in result.items()
+        }
+
+def collect_files(root):
+    result = []
+
+    for fname in os.listdir(root):
+        if not fname.endswith('.npz'):
+            continue
+
+        result.append(os.path.join(root, fname))
+
+    return result
+
+def load_nodes_dict(path):
+    result = defaultdict(dict)
+
+    with np.load(path) as f:
+        for name, values in f.items():
+            if not name.startswith('node:'):
+                continue
+
+            result[name] = values
+
+    return result
+
+class StatsWorker:
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self):
+        pass
+
+    def __call__(self, path):
+        result     = StatsAccumulator()
+
+        nodes_dict = load_nodes_dict(path)
+        result.append(nodes_dict)
+
+        return result
+
+def parse_cmdargs():
+    parser = argparse.ArgumentParser("Precompute cropped regions")
+
+    parser.add_argument(
+        'root',
+        help    = 'Directory where the original dataset is located',
+        metavar = 'ROOT',
+        type    = str,
+    )
+
+    return parser.parse_args()
+
+def preprocess(path_list):
+    result = StatsAccumulator()
+
+    progbar = tqdm.tqdm(
+        desc  = 'Acumulating Stats',
+        total = len(path_list),
+        dynamic_ncols = True
+    )
+    worker = StatsWorker()
+
+    with multiprocessing.Pool() as pool:
+        for stats in pool.imap_unordered(worker, path_list):
+            result += stats
+            progbar.update()
+
+    progbar.close()
+
+    return result.to_dict()
+
+def main():
+    cmdargs = parse_cmdargs()
+
+    print("Collecting Stats...")
+    path_list = collect_files(cmdargs.root)
+    stats     = preprocess(path_list)
+
+    print("Saving Stats...")
+    stat_path = os.path.join(cmdargs.root, 'stats.json')
+
+    with open(stat_path, 'wt', encoding = 'utf-8') as f:
+        json.dump(stats, f, sort_keys = True, indent = 4)
+
+if __name__ == '__main__':
+    main()
+
