@@ -35,9 +35,16 @@ NODE_FEATURE_IDX_MAP = {
 
 class Nodes:
 
-    def __init__(self, ids : np.ndarray, values : np.ndarray) -> None:
-        self._ids    = ids
-        self._values = values
+    def __init__(
+        self,
+        ids      : np.ndarray,
+        values   : np.ndarray,
+        features : List[str]
+    ) -> None:
+        self._ids      = ids
+        self._values   = values
+        self._features = features
+
         self._id_set = set(tuple(x) for x in ids)
         self._id_index_map = { tuple(x) : i for (i, x) in enumerate(ids) }
 
@@ -59,6 +66,10 @@ class Nodes:
     @property
     def values(self) -> np.ndarray:
         return self._values
+
+    @property
+    def features(self) -> List[str]:
+        return self._features
 
     def __len__(self):
         return len(self._ids)
@@ -103,8 +114,10 @@ class Nodes:
                     for feature in selected_features
             ]
             values = values[:, selected_indices]
+        else:
+            selected_features = NODE_FEATURES[name]
 
-        return Nodes(ids, values)
+        return Nodes(ids, values, selected_features)
 
     def ids_in_set_mask(self, filter_ids : Set[NodeId]) -> np.ndarray:
         mask = np.isin(self.ids, list(filter_ids), assume_unique = True)
@@ -115,11 +128,17 @@ class Nodes:
         if mask is None:
             return self
 
-        return Nodes(self.ids[mask], self.values[mask])
+        return Nodes(self.ids[mask], self.values[mask], self.features)
 
     def __getstate__(self):
-        return { 'ids': self._ids, 'values' : self._values, }
+        return {
+            'ids'      : self._ids,
+            'values'   : self._values,
+            'features' : self._features
+        }
 
     def __setstate__(self, state_dict):
-        return Nodes(state_dict['ids'], state_dict['values'])
+        return Nodes(
+            state_dict['ids'], state_dict['values'], state_dict['features']
+        )
 
