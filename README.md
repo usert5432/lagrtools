@@ -11,14 +11,20 @@ python setup.py develop
 
 # Overview
 
-As of now, `lagrtools` has two main components:
+As of now, `lagrtools` has several components:
 
 1. A converter script `srcipts/preprocess` that takes a Wire-Cell graph dataset
    (made of pairs of graphs `(img, tru)`, c.f. `Data Format`) and transforms
-   it into a simple dataset of heterogeneous graph suitable for
+   it into a simple dataset of heterogeneous graphs suitable for
    `torch_geometric`.
 
-2. `torch_geometric` data loader in `lagrtools/torch`.
+2. A helper script `srcipts/dataset_stats` that calculates various statistics
+   of node features.
+
+3. `torch_geometric` dataset in `lagrtools/torch`.
+
+4. `torch_geometric` transformations in `lagrtools/torch/transforms`.
+
 
 ## Wire-Cell Graph Format
 
@@ -26,7 +32,7 @@ Currently, Wire-Cell outputs graphs as pairs of `(img, tru)`. Each graph in a
 pair conforms to the following
 [schema](https://github.com/WireCell/wire-cell-toolkit/blob/master/aux/docs/ClusterArrays.org).
 
-The `img` graph contains reconstructed information. This info is suppsed to be
+The `img` graph contains reconstructed information. This info is supposed to be
 fed as input to Graph Neural Networks (GNN). The `tru` graph contains truth
 information that the GNN is expected to predict.
 
@@ -56,8 +62,8 @@ located. The dataset is a collection `.npz` files with names
 `clusters-(tru|img)-aN.npz`.
 
 `$OUTOUT` is an output directory where the processed dataset will
-be saved. Finally, `$CONFIG` is a path to a config, that defines wich
-nodes/features from the Wire-Cell graphs to extract. Please, fefer to the
+be saved. Finally, `$CONFIG` is a path to a config, that defines which
+nodes/features from the Wire-Cell graphs to extract. Please, refer to the
 example file `examples/preprocess_configs/simple.toml` for details.
 
 
