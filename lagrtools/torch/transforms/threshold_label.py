@@ -20,7 +20,7 @@ class ThresholdLabel(T.BaseTransform):
         label = data[self._node_name][self._io_type][:, self._feature_index]
         label = (label > self._threshold).unsqueeze(1)
 
-        data[self._node_name][self._target_label] = label.float()
+        data[self._node_name][self._target_label] = label.int()
 
         return data
 
