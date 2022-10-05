@@ -39,7 +39,7 @@ class Nodes:
         self,
         ids      : np.ndarray,
         values   : np.ndarray,
-        features : List[str]
+        features : Optional[List[str]] = None
     ) -> None:
         self._ids      = ids
         self._values   = values
@@ -68,7 +68,7 @@ class Nodes:
         return self._values
 
     @property
-    def features(self) -> List[str]:
+    def features(self) -> Optional[List[str]]:
         return self._features
 
     def __len__(self):
